@@ -1,7 +1,9 @@
 package com.hmdp.interceptor;
 
+import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
 import com.hmdp.utils.UserHolder;
+import org.springframework.beans.BeanUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -25,7 +27,9 @@ public class LoginInterceptor implements HandlerInterceptor {
             return false;
         }
         //拦截到了请求，把用户信息放到ThreadLocal,在后面的controller就可以拿到了
-        UserHolder.saveUser((User) user);
+        // UserHolder.saveUser((User) user);
+
+        UserHolder.saveUser((UserDTO) user);
         //放行
         return true;
     }
