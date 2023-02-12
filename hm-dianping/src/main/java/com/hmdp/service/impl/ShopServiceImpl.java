@@ -32,18 +32,25 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryShopById(Long id) {
+
         //先redis
         String shopString = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
         if (StrUtil.isNotBlank(shopString)){
             Shop shop = JSONUtil.toBean(shopString, Shop.class);
             return Result.ok(shop);
         }
+        //如果是穿透情况, redis返回是"", 此时也去查mysql也查不到东西，所以直接返回,不要去请求数据库
+        if ("".equals(shopString)){
+            return Result.fail("该店铺不存在");
+        }
         // redis不存在,查mysql
         Shop shop = getById(id);
         if (Objects.isNull(shop)){
+            //将空值写入redis解决缓存穿透问题
+            stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
             return Result.fail("该店铺不存在");
         }
-        stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + shop.getId(), JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
         return Result.ok(shop);
     }
 
