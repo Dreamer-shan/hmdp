@@ -2,14 +2,19 @@ package com.hmdp.controller;
 
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.service.IShopService;
+import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.SystemConstants;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -26,6 +31,8 @@ public class ShopController {
     @Resource
     public IShopService shopService;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
     /**
      * 根据id查询商铺信息
      * @param id 商铺id
@@ -33,7 +40,19 @@ public class ShopController {
      */
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
-        return Result.ok(shopService.getById(id));
+        //先redis
+        String shopString = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY);
+        if (StrUtil.isNotBlank(shopString)){
+            Shop shop = JSONUtil.toBean(shopString, Shop.class);
+            return Result.ok(shop);
+        }
+        // redis不存在,查mysql
+        Shop shop = shopService.getById(id);
+        if (Objects.isNull(shop)){
+            return Result.fail("该店铺不存在");
+        }
+        stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        return Result.ok(shop);
     }
 
     /**
@@ -70,8 +89,8 @@ public class ShopController {
     @GetMapping("/of/type")
     public Result queryShopByType(
             @RequestParam("typeId") Integer typeId,
-            @RequestParam(value = "current", defaultValue = "1") Integer current
-    ) {
+            @RequestParam(value = "current", defaultValue = "1") Integer current) {
+
         // 根据类型分页查询
         Page<Shop> page = shopService.query()
                 .eq("type_id", typeId)
