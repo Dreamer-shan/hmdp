@@ -31,8 +31,6 @@ public class ShopController {
     @Resource
     public IShopService shopService;
 
-    @Resource
-    private StringRedisTemplate stringRedisTemplate;
     /**
      * 根据id查询商铺信息
      * @param id 商铺id
@@ -40,19 +38,7 @@ public class ShopController {
      */
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
-        //先redis
-        String shopString = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY);
-        if (StrUtil.isNotBlank(shopString)){
-            Shop shop = JSONUtil.toBean(shopString, Shop.class);
-            return Result.ok(shop);
-        }
-        // redis不存在,查mysql
-        Shop shop = shopService.getById(id);
-        if (Objects.isNull(shop)){
-            return Result.fail("该店铺不存在");
-        }
-        stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        return Result.ok(shop);
+        return shopService.queryShopById(id);
     }
 
     /**
@@ -75,8 +61,7 @@ public class ShopController {
      */
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
-        // 写入数据库
-        shopService.updateById(shop);
+        shopService.update(shop);
         return Result.ok();
     }
 
