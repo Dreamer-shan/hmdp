@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -32,26 +33,76 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryShopById(Long id) {
+        //缓存穿透
+        // Shop shop = queryWithPassThrough(id);
 
+        //缓存击穿
+        Shop shop = queryWithMutex(id);
+        if (Objects.isNull(shop)){
+            return Result.fail("该店铺不存在");
+        }
+        return Result.ok(shop);
+    }
+
+    public Shop queryWithMutex(Long id){
         //先redis
         String shopString = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
         if (StrUtil.isNotBlank(shopString)){
             Shop shop = JSONUtil.toBean(shopString, Shop.class);
-            return Result.ok(shop);
+            return shop;
         }
         //如果是穿透情况, redis返回是"", 此时也去查mysql也查不到东西，所以直接返回,不要去请求数据库
         if ("".equals(shopString)){
-            return Result.fail("该店铺不存在");
+            return null;
+        }
+        String lockKey = null;
+        Shop shop = null;
+        try {
+            //实现缓存重建
+            lockKey = RedisConstants.LOCK_SHOP_KEY + id;
+            if (!tryLock(lockKey)){
+                //失败,休眠后重试
+                Thread.sleep(50);
+                return queryWithMutex(id);
+            }
+            //成功，根据id查询数据库
+            shop = getById(id);
+            //模拟重建所需时间
+            Thread.sleep(200);
+            if (Objects.isNull(shop)){
+                //将空值写入redis解决缓存穿透问题
+                stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+                return null;
+            }
+            stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }finally {
+            unLock(lockKey);
+        }
+        return shop;
+    }
+
+    public Shop queryWithPassThrough(Long id){
+        //先redis
+        String shopString = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
+        if (StrUtil.isNotBlank(shopString)){
+            Shop shop = JSONUtil.toBean(shopString, Shop.class);
+            return shop;
+        }
+        //如果是穿透情况, redis返回是"", 此时也去查mysql也查不到东西，所以直接返回,不要去请求数据库
+        if ("".equals(shopString)){
+            return null;
         }
         // redis不存在,查mysql
         Shop shop = getById(id);
         if (Objects.isNull(shop)){
             //将空值写入redis解决缓存穿透问题
             stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return Result.fail("该店铺不存在");
+            return null;
         }
         stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        return Result.ok(shop);
+        return shop;
     }
 
     @Override
@@ -64,5 +115,14 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         updateById(shop);
         stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY + shop.getId());
         return Result.ok();
+    }
+
+    private Boolean tryLock(String key){
+        Boolean ret = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(ret);
+    }
+
+    private void unLock(String key){
+        stringRedisTemplate.delete(key);
     }
 }
